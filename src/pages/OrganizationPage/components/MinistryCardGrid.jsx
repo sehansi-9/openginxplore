@@ -1036,6 +1036,7 @@ const MinistryCardGrid = () => {
                                         selectedDate={
                                           selectedDate?.date || selectedDate
                                         }
+                                         ministryId={selectedCard?.id}
                                       />
                                     )}
                                   </>
