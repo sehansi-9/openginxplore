@@ -38,40 +38,6 @@ export default function GraphComponent({ activeMinistries, filterType }) {
 
   const { colors, isDark } = useThemeContext();
 
-  // Calculate graph width based on drawer state
-  useEffect(() => {
-    const calculateGraphWidth = () => {
-      const screenWidth = window.innerWidth;
-
-      if (expandDrawer) {
-        // Mobile: full width (drawer overlays)
-        if (screenWidth < 768) {
-          setGraphWidth(screenWidth);
-        }
-        // Tablet: 50% for drawer
-        else if (screenWidth < 1024) {
-          setGraphWidth(Math.floor(screenWidth / 2));
-        }
-        // Desktop: 2/3 for graph, 1/3 for drawer
-        else {
-          setGraphWidth(Math.floor((screenWidth * 2) / 3));
-        }
-      } else {
-        setGraphWidth(screenWidth);
-      }
-    };
-
-    calculateGraphWidth();
-
-    const handleResize = () => {
-      calculateGraphWidth();
-    };
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [expandDrawer]);
 
   // Track graph height responsively (numeric, avoids remount/reset)
   useEffect(() => {
@@ -101,6 +67,31 @@ export default function GraphComponent({ activeMinistries, filterType }) {
     (state) => state.allDepartmentData.allDepartmentData
   );
   const allPersonData = useSelector((state) => state.allPerson.allPerson);
+
+  const hasDrawerContent = useMemo(() => {
+    if (loading || nodeLoading || selectedNode) return true;
+    return (
+      Object.keys(ministryDictionary).length > 0 ||
+      Object.keys(departmentDictionary).length > 0 ||
+      Object.keys(personDictionary).length > 0 ||
+      !!(allMinistryData && new URLSearchParams(location.search).get("ministry"))
+    );
+  }, [loading, nodeLoading, selectedNode, ministryDictionary, departmentDictionary, personDictionary, location.search, allMinistryData]);
+
+  useEffect(() => {
+    setExpandDrawer(hasDrawerContent);
+  }, [hasDrawerContent]);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      const sw = window.innerWidth;
+      const show = expandDrawer && hasDrawerContent;
+      setGraphWidth(!show ? sw : sw < 768 ? sw : sw < 1024 ? Math.floor(sw / 2) : Math.floor((sw * 2) / 3));
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, [expandDrawer, hasDrawerContent]);
 
   useEffect(() => {
     const checkWebGL = () => {
@@ -773,17 +764,19 @@ export default function GraphComponent({ activeMinistries, filterType }) {
           )}
         </div>
 
-        <Drawer
-          expandDrawer={expandDrawer}
-          setExpandDrawer={setExpandDrawer}
-          selectedNode={selectedNode}
-          onMinistryClick={handleNodeClick}
-          parentNode={graphParent}
-          personDic={personDictionary}
-          ministryDic={ministryDictionary}
-          departmentDic={departmentDictionary}
-          loading={nodeLoading}
-        />
+        {hasDrawerContent && (
+          <Drawer
+            expandDrawer={expandDrawer}
+            setExpandDrawer={setExpandDrawer}
+            selectedNode={selectedNode}
+            onMinistryClick={handleNodeClick}
+            parentNode={graphParent}
+            personDic={personDictionary}
+            ministryDic={ministryDictionary}
+            departmentDic={departmentDictionary}
+            loading={nodeLoading}
+          />
+        )}
       </div>
       <WebGLChecker />
     </>
