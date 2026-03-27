@@ -4,17 +4,17 @@ import utils from "../../../utils/utils";
 import {
   setSelectedPresident,
   setSelectedDate,
+  setSelectedTermId,
 } from "../../../store/presidencySlice";
+
 import { setGazetteData } from "../../../store/gazetteDate";
 import { Link, useLocation } from "react-router-dom";
 import { EyeIcon } from "lucide-react";
+import { useAllPresidents } from "../../../hooks/useAllPresidents";
 
 export default function FilteredPresidentCards({ dateRange = [null, null] }) {
   const dispatch = useDispatch();
-  const presidents = useSelector((s) => s.presidency.presidentDict);
-  const presidentRelationDict = useSelector(
-    (s) => s.presidency.presidentRelationDict
-  );
+  const { data: presidentsArray, isLoading: isPresidentsLoading } = useAllPresidents();
   const gazetteDateClassic = useSelector((s) => s.gazettes.gazetteDataClassic);
   const selectedPresident = useSelector((s) => s.presidency.selectedPresident);
   const selectedDate = useSelector((s) => s.presidency.selectedDate);
@@ -28,61 +28,77 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
   const location = useLocation()
 
   const filteredPresidents = useMemo(() => {
-    if (!presidents) return [];
-    const arr = Array.isArray(presidents)
-      ? presidents
-      : Object.values(presidents);
+    if (!presidentsArray || isPresidentsLoading) return [];
+
     const [rangeStart, rangeEnd] = dateRange;
 
-    return arr
-      .filter((p) => {
-        const rel = presidentRelationDict[p.id];
-        if (!rel) return false;
+    // Flatten presidents into individual terms
+    const allTerms = [];
+    presidentsArray.forEach((p) => {
+      p.terms.forEach((term, index) => {
+        allTerms.push({
+          ...p,
+          term,
+          termIndex: index,
+          // Unique key for the card: presidentId + term start
+          termId: `${p.id}_${term.start}`
+        });
+      });
+    });
+
+    return allTerms
+      .filter((item) => {
         if (!rangeStart || !rangeEnd) return true;
-        const presStart = new Date(rel.startTime.split("T")[0]);
-        const presEnd = rel.endTime
-          ? new Date(rel.endTime.split("T")[0])
-          : new Date();
+
+        const presStart = new Date(item.term.start);
+        const presEnd = item.term.end ? new Date(item.term.end) : new Date();
         return presStart < rangeEnd && presEnd > rangeStart;
       })
-      .filter((p) => {
+      .filter((item) => {
         if (!searchTerm) return true;
-        const nameText = utils.extractNameFromProtobuf(p.name);
-        const rel = presidentRelationDict[p.id];
-        const startYear = rel?.startTime ? rel.startTime.split("-")[0] : "";
-        const endYear = rel?.endTime
-          ? new Date(rel.endTime).getFullYear()
-          : "Present";
-        const term = startYear ? `${startYear} - ${endYear}` : "";
-        const q = searchTerm.toLowerCase();
-        return (
-          nameText.toLowerCase().includes(q) || term.toLowerCase().includes(q)
-        );
-      });
-  }, [presidents, presidentRelationDict, dateRange, searchTerm]);
+        const nameText = item.name;
 
+        const q = searchTerm.toLowerCase();
+        const matchesName = nameText.toLowerCase().includes(q);
+
+        const startYear = item.term.start.split("-")[0];
+        const endYear = item.term.end ? new Date(item.term.end).getFullYear() : "Present";
+        const termStr = `${startYear} - ${endYear}`;
+        const matchesTerm = termStr.toLowerCase().includes(q);
+
+        return matchesName || matchesTerm;
+      })
+      .sort((a, b) => new Date(a.term.start) - new Date(b.term.start));
+
+  }, [presidentsArray, isPresidentsLoading, dateRange, searchTerm]);
+
+  const { selectedTermId } = useSelector((state) => state.presidency);
 
   const selectPresidentAndDates = (
-    president,
+    item,
     urlDateRange = null,
     urlSelectedDate = null
   ) => {
-    if (!president) {
+    if (!item) {
       dispatch(setSelectedPresident(null));
       dispatch(setGazetteData([]));
       dispatch(setSelectedDate(null));
+      dispatch(setSelectedTermId(null));
+
       return;
     }
 
+    const { term, termId, ...president } = item;
     dispatch(setSelectedPresident(president));
+    dispatch(setSelectedTermId(termId));
 
-    const rel = presidentRelationDict[president.id];
-    const presStart = new Date(rel.startTime.split("T")[0]);
-    const presEnd = rel?.endTime
-      ? new Date(rel.endTime.split("T")[0])
-      : new Date();
 
     const [rangeStart, rangeEnd] = urlDateRange || dateRange;
+
+    const presStart = new Date(term.start);
+    const presEnd = term.end
+      ? new Date(term.end)
+      : new Date();
 
     const finalStart = rangeStart
       ? new Date(Math.max(presStart, rangeStart))
@@ -92,9 +108,10 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     const filteredDates = gazetteDateClassic
       .filter((d) => {
         const dd = new Date(d.date);
-        return dd >= finalStart && dd < finalEnd;
-      })
-      .map((date) => (date));
+        // Exclusive of end date if term has ended, to prevent overlap with next president's start
+        return dd >= finalStart && (term.end ? dd < finalEnd : dd <= finalEnd);
+      });
+
 
     dispatch(setGazetteData(filteredDates));
 
@@ -111,21 +128,11 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
   };
 
 
+
   useEffect(() => {
     if (initializedFromUrl) return;
 
-    if (
-      !presidents ||
-      (Array.isArray(presidents)
-        ? presidents.length === 0
-        : Object.keys(presidents).length === 0)
-    )
-      return;
-    if (
-      !presidentRelationDict ||
-      Object.keys(presidentRelationDict).length === 0
-    )
-      return;
+    if (!presidentsArray || isPresidentsLoading) return;
     if (!gazetteDateClassic || gazetteDateClassic.length === 0) return;
 
     const params = new URLSearchParams(window.location.search);
@@ -134,49 +141,16 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     let urlEndDate = params.get("endDate");
 
     if (urlSelectedDate) {
-      const targetDate = new Date(urlSelectedDate);
-      let start = urlStartDate ? new Date(urlStartDate) : null;
-      let end = urlEndDate ? new Date(urlEndDate) : null;
-
-      if (!start || !end || targetDate < start || targetDate > end) {
-        const year = targetDate.getFullYear();
-        urlStartDate = `${year}-01-01`;
-        urlEndDate = `${year}-12-31`;
-
-        const url = new URL(window.location.href);
-        url.searchParams.set("startDate", urlStartDate);
-        url.searchParams.set("endDate", urlEndDate);
-        window.history.replaceState({}, "", url.toString());
-
-      }
-    }
-
-    const validSelectedDate = urlSelectedDate;
-
-    if (validSelectedDate) {
-      const urlRange = [new Date(urlStartDate), new Date(urlEndDate)];
-
-      const allPresidents = Array.isArray(presidents)
-        ? presidents
-        : Object.values(presidents);
-
-      const presidentForDate = allPresidents.find((p) => {
-        const rel = presidentRelationDict[p.id];
-        if (!rel || !rel.startTime) return false;
-
-        const start = new Date(rel.startTime.split("T")[0]);
-        const end = rel.endTime
-          ? new Date(rel.endTime.split("T")[0])
-          : new Date();
-
-        const matches =
-          new Date(validSelectedDate) >= start &&
-          new Date(validSelectedDate) < end;
-        return matches;
+      // Find term covering this date
+      const termToSelect = filteredPresidents.find((p) => {
+        const start = new Date(p.term.start);
+        const end = p.term.end ? new Date(p.term.end) : new Date();
+        return new Date(urlSelectedDate) >= start && new Date(urlSelectedDate) < end;
       });
 
-      if (presidentForDate) {
-        selectPresidentAndDates(presidentForDate, urlRange, validSelectedDate);
+      if (termToSelect) {
+        const urlRange = [new Date(urlStartDate), new Date(urlEndDate)];
+        selectPresidentAndDates(termToSelect, urlRange, urlSelectedDate);
         setInitializedFromUrl(true);
         setUrlInitComplete(true);
         return;
@@ -184,16 +158,18 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     }
 
     if (filteredPresidents.length > 0) {
-      const lastPresident = filteredPresidents[filteredPresidents.length - 1];
-      selectPresidentAndDates(lastPresident);
+      selectPresidentAndDates(filteredPresidents[filteredPresidents.length - 1]);
       setInitializedFromUrl(true);
     }
+
   }, [
-    presidents,
-    presidentRelationDict,
+    presidentsArray,
+    isPresidentsLoading,
     gazetteDateClassic,
     initializedFromUrl,
+    filteredPresidents
   ]);
+
 
   useEffect(() => {
     if (!initializedFromUrl) return;
@@ -242,14 +218,20 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     }
 
     if (filteredPresidents.length > 0) {
-      const lastPresident = filteredPresidents[filteredPresidents.length - 1];
-      selectPresidentAndDates(lastPresident);
+      // Check if current selection is still in the filtered list
+      const isStillInList = filteredPresidents.some(p => p.termId === selectedTermId);
+
+      if (!isStillInList) {
+        // Only then auto-select the latest
+        selectPresidentAndDates(filteredPresidents[filteredPresidents.length - 1]);
+      }
     } else {
       selectPresidentAndDates(null);
     }
 
     prevDateRangeRef.current = dateRange;
-  }, [dateRange, filteredPresidents, initializedFromUrl, urlInitComplete]);
+  }, [dateRange, filteredPresidents, initializedFromUrl, urlInitComplete, selectedTermId]);
+
 
   useEffect(() => {
     if (!selectedDate?.date) return;
@@ -264,18 +246,7 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     if (!initializedFromUrl) return;
 
     // Don't run if we don't have the required data yet
-    if (
-      !presidents ||
-      (Array.isArray(presidents)
-        ? presidents.length === 0
-        : Object.keys(presidents).length === 0)
-    )
-      return;
-    if (
-      !presidentRelationDict ||
-      Object.keys(presidentRelationDict).length === 0
-    )
-      return;
+    if (!presidentsArray || isPresidentsLoading) return;
     if (!gazetteDateClassic || gazetteDateClassic.length === 0) return;
 
     const currentUrlSearch = location.search;
@@ -288,37 +259,23 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     if (!urlSelectedDate || !urlStartDate || !urlEndDate) return;
 
     // Check if we've already processed this exact URL
-    // BUT always process if it's a minister search (has filterByName parameter)
     const hasFilterByName = params.get("filterByName");
     if (lastProcessedUrlRef.current === currentUrlSearch && !hasFilterByName) return;
 
-    // Find the president for the selected date
-    const allPresidents = Array.isArray(presidents)
-      ? presidents
-      : Object.values(presidents);
-
-    const presidentForDate = allPresidents.find((p) => {
-      const rel = presidentRelationDict[p.id];
-      if (!rel || !rel.startTime) return false;
-
-      const start = new Date(rel.startTime.split("T")[0]);
-      const end = rel.endTime
-        ? new Date(rel.endTime.split("T")[0])
-        : new Date();
-
-      const matches =
-        new Date(urlSelectedDate) >= start &&
-        new Date(urlSelectedDate) < end;
-      return matches;
+    // Find the term covering the selected date
+    const termToSelect = filteredPresidents.find((p) => {
+      const start = new Date(p.term.start);
+      const end = p.term.end ? new Date(p.term.end) : new Date();
+      return new Date(urlSelectedDate) >= start && new Date(urlSelectedDate) < end;
     });
 
-    if (presidentForDate) {
+    if (termToSelect) {
       const urlRange = [new Date(urlStartDate), new Date(urlEndDate)];
-      selectPresidentAndDates(presidentForDate, urlRange, urlSelectedDate);
-      // Mark this URL as processed after successful update
+      selectPresidentAndDates(termToSelect, urlRange, urlSelectedDate);
       lastProcessedUrlRef.current = currentUrlSearch;
     }
-  }, [location.search, location.key, initializedFromUrl, presidents, presidentRelationDict, gazetteDateClassic]);
+  }, [location.search, location.key, initializedFromUrl, presidentsArray, isPresidentsLoading, gazetteDateClassic, filteredPresidents]);
+
 
 
   return (
@@ -339,19 +296,17 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
         </div>
       ) : (
         <div className="flex overflow-x-auto snap-x snap-mandatory md:grid md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3 pb-2 md:pb-0 no-scrollbar">
-          {filteredPresidents.map((president) => {
-            const isSelected = selectedPresident?.id === president.id;
-            const nameText = utils.extractNameFromProtobuf(president.name);
-            const rel = presidentRelationDict[president.id];
-            const startYear = rel?.startTime ? rel.startTime.split("-")[0] : "";
-            const endYear = rel?.endTime
-              ? new Date(rel.endTime).getFullYear()
-              : "Present";
-            const term = startYear ? `${startYear} - ${endYear}` : "";
+          {filteredPresidents.map((p) => {
+            const isSelected = selectedTermId === p.termId;
+            const nameText = p.name;
+
+            const startYear = p.term.start.split("-")[0];
+            const endYear = p.term.end ? new Date(p.term.end).getFullYear() : "Present";
+            const term = `${startYear} - ${endYear}`;
             return (
               <button
-                key={president.id}
-                onClick={() => selectPresidentAndDates(president)}
+                key={p.termId}
+                onClick={() => selectPresidentAndDates(p)}
                 className={`min-w-[60vw] sm:min-w-[300px] md:min-w-0 flex-shrink-0 snap-center flex items-center p-1.5 md:p-2 rounded-lg border transition-all duration-200 hover:cursor-pointer
     ${isSelected
                     ? "bg-accent/20 border-accent/35 shadow-md"
@@ -359,7 +314,7 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
                   }`}
               >
                 <img
-                  src={president.imageUrl || president.image || ""}
+                  src={p.imageUrl || p.image || ""}
                   alt={nameText}
                   className="md:w-14 w-10 md:h-14 h-10 object-cover rounded-full mr-3 border border-border flex-shrink-0"
                 />
@@ -375,7 +330,7 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
                   </p>
                   <div className="flex flex-nowrap gap-3 mt-1">
                     <Link
-                      to={`/person-profile/${president?.id}`}
+                      to={`/person-profile/${p?.id}`}
                       onClick={(e) => e.stopPropagation()}
                       state={{ mode: "back", from: location.pathname + location.search }}
                       className="text-primary/75 text-xs md:text-sm hover:text-accent transition-all animation duration-200 mt-1 flex"

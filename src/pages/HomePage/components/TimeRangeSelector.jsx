@@ -6,6 +6,7 @@ import utils from "../../../utils/utils";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Tooltip from "@mui/material/Tooltip";
 import { ChevronRight, ChevronLeft } from "lucide-react";
+import { useAllPresidents } from "../../../hooks/useAllPresidents";
 
 export default function TimeRangeSelector({
   startYear,
@@ -22,12 +23,7 @@ export default function TimeRangeSelector({
     date.setFullYear(date.getFullYear() - 5);
     return date;
   });
-  const presidentsArray = useSelector(
-    (state) => state.presidency.presidentDict
-  );
-  const presidentRelationDict = useSelector(
-    (state) => state.presidency.presidentRelationDict
-  );
+  const { data: presidentsArray } = useAllPresidents();
   const location = useLocation();
   const containerRef = useRef(null);
   const dragStartRef = useRef(null);
@@ -92,6 +88,7 @@ export default function TimeRangeSelector({
   const [tempEndDate, setTempEndDate] = useState(initialEnd);
   const [preciseMode, setPreciseMode] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [expandedPresidentId, setExpandedPresidentId] = useState(null);
   const [tooltip, setTooltip] = useState({
     show: false,
     x: 0,
@@ -242,29 +239,25 @@ export default function TimeRangeSelector({
   }, [defaultStartDate, location.key, location.search]);
 
   const presidents = useMemo(() => {
-    if (!presidentsArray || !presidentRelationDict) return {};
+    if (!presidentsArray) return {};
 
     const obj = {};
 
     presidentsArray.forEach((president) => {
-      const relation = presidentRelationDict[president.id];
-      if (!relation) return;
+      const displayName = president.name;
 
-      const displayName = utils.extractNameFromProtobuf(president.name);
 
       obj[president.id] = {
         name: displayName,
-        terms: [
-          {
-            start: relation.startTime,
-            end: relation.endTime || new Date().toISOString().slice(0, 10),
-          },
-        ],
+        terms: president.terms.map((term) => ({
+          start: term.start,
+          end: term.end || new Date().toISOString().slice(0, 10),
+        })),
       };
     });
 
     return obj;
-  }, [presidentsArray, presidentRelationDict]);
+  }, [presidentsArray]);
 
   // Preprocess dates into a lookup: year -> month -> count
   const dateCounts = useMemo(() => {
@@ -832,7 +825,11 @@ export default function TimeRangeSelector({
               ? "bg-accent/20 text-primary"
               : "hover:bg-background/25 bg-foreground/10 text-primary hover:cursor-pointer"
               }`}
-            onClick={() => setIsDropdownOpen((o) => !o)}
+            onClick={() => {
+              setIsDropdownOpen((o) => !o);
+              setExpandedPresidentId(null);
+            }}
+
           >
             <span>
               {activePresident
@@ -873,80 +870,96 @@ export default function TimeRangeSelector({
 
           {/* Dropdown menu */}
           {isDropdownOpen && (
-            <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-md shadow-lg">
+            <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-md shadow-lg overflow-hidden">
               {Object.entries(presidents).map(([id, data]) => (
-                <div key={id} className="group relative">
+                <div key={id} className="relative flex border-b border-border/10 last:border-0 group">
                   {/* President row */}
                   <button
-                    className={`w-full px-3 py-1.5 text-left flex justify-between items-center cursor-pointer hover:bg-border ${activePresident === id
+                    className={`flex-1 px-3 py-2 text-left flex justify-between items-center cursor-pointer transition-colors ${activePresident === id && !expandedPresidentId
                       ? "bg-accent/20 text-primary"
-                      : "text-primary"
+                      : "text-primary hover:bg-foreground/5"
                       }`}
                     onClick={() => {
-                      if (data.terms.length === 1) {
-                        const term = data.terms[0];
-                        setActivePresident(id);
-                        setStartDate(new Date(term.start));
-                        setTempStartDate(new Date(term.start));
-                        setEndDate(new Date(term.end));
-                        setTempEndDate(new Date(term.end));
-                        setSelectedRange([
-                          new Date(term.start).getUTCFullYear(),
-                          new Date(term.end).getUTCFullYear(),
-                        ]);
-                        setPreciseMode(true);
-                        setActivePreset(null);
-                        setIsDropdownOpen(false);
-                      }
+                      // For single term, select it. For multi-term, select the latest term but don't open drawer.
+                      const term = data.terms[data.terms.length - 1];
+                      setActivePresident(id);
+                      setStartDate(new Date(term.start));
+                      setTempStartDate(new Date(term.start));
+                      setEndDate(new Date(term.end));
+                      setTempEndDate(new Date(term.end));
+                      setSelectedRange([
+                        new Date(term.start).getUTCFullYear(),
+                        new Date(term.end).getUTCFullYear(),
+                      ]);
+                      setPreciseMode(true);
+                      setActivePreset(null);
+                      setIsDropdownOpen(false);
+                      setExpandedPresidentId(null);
                     }}
                   >
-                    {data.name}
-                    {data.terms.length > 1 && (
-                      <span className="ml-1 text-primary text-xs">▶</span>
-                    )}
+                    <span className="truncate">{data.name}</span>
                   </button>
 
-                  {/* Nested terms */}
                   {data.terms.length > 1 && (
-                    <div className="absolute top-0 left-full mt-0 ml-1 w-40 bg-border border border-border rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                      {data.terms.map((term, idx) => (
-                        <button
-                          key={idx}
-                          className={`w-full px-3 py-1.5 text-left cursor-pointer hover:bg-border ${activePresident === id &&
-                            startDate.getTime() ===
-                            new Date(term.start).getTime() &&
-                            endDate.getTime() === new Date(term.end).getTime()
-                            ? "bg-accent text-white"
-                            : "text-primary"
-                            }`}
-                          onClick={() => {
-                            setActivePresident(id);
-                            setStartDate(new Date(term.start));
-                            setTempStartDate(new Date(term.start));
-                            setEndDate(new Date(term.end));
-                            setTempEndDate(new Date(term.end));
-                            setSelectedRange([
-                              new Date(term.start).getUTCFullYear(),
-                              new Date(term.end).getUTCFullYear(),
-                            ]);
-                            setPreciseMode(true);
-                            setActivePreset(null);
-                            setIsDropdownOpen(false);
-                          }}
-                        >
-                          {`${new Date(
-                            term.start
-                          ).getUTCFullYear()} - ${new Date(
-                            term.end
-                          ).getUTCFullYear()}`}
-                        </button>
-                      ))}
+                    <button
+                      className={`px-2 flex items-center justify-center border-l border-border/10 transition-colors hover:bg-accent/10 hover:text-accent cursor-pointer ${expandedPresidentId === id ? "bg-accent/10 text-accent" : "text-primary/60"
+                        }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedPresidentId(expandedPresidentId === id ? null : id);
+                      }}
+                    >
+                      <ChevronRight size={14} className={`transition-transform duration-200 ${expandedPresidentId === id ? "rotate-90 md:rotate-0" : ""}`} />
+                    </button>
+                  )}
+
+                  {/* Nested terms drawer */}
+                  {data.terms.length > 1 && expandedPresidentId === id && (
+                    <div className="absolute left-0 top-full md:top-0 md:left-full w-full md:w-48 bg-background border border-border rounded-md shadow-xl z-50 py-1 max-h-48 overflow-y-auto animate-in fade-in slide-in-from-left-2 duration-200">
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-primary/40 uppercase tracking-wider border-b border-border/10">
+                        Select Term
+                      </div>
+                      {[...data.terms].reverse().map((term, idx) => {
+                        const isSelected = activePresident === id &&
+                          startDate.getTime() === new Date(term.start).getTime() &&
+                          endDate.getTime() === new Date(term.end).getTime();
+
+                        return (
+                          <button
+                            key={idx}
+                            className={`w-full px-3 py-2 text-left cursor-pointer transition-colors hover:bg-accent/5 flex flex-col gap-0.5 ${isSelected
+                              ? "bg-accent/10 text-accent"
+                              : "text-primary"
+                              }`}
+                            onClick={() => {
+                              setActivePresident(id);
+                              setStartDate(new Date(term.start));
+                              setTempStartDate(new Date(term.start));
+                              setEndDate(new Date(term.end));
+                              setTempEndDate(new Date(term.end));
+                              setSelectedRange([
+                                new Date(term.start).getUTCFullYear(),
+                                new Date(term.end).getUTCFullYear(),
+                              ]);
+                              setPreciseMode(true);
+                              setActivePreset(null);
+                              setIsDropdownOpen(false);
+                              setExpandedPresidentId(null);
+                            }}
+                          >
+                            <span className="text-[11px] font-medium leading-none">
+                              {`(${new Date(term.start).getUTCFullYear()} - ${new Date(term.end).getUTCFullYear()})`}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               ))}
             </div>
           )}
+
         </div>
 
         {/* Calendar button */}

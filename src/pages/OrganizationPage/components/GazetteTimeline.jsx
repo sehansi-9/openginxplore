@@ -67,50 +67,62 @@ export default function GazetteTimeline() {
   };
 
   const drawLine = () => {
-    if (!avatarRef.current || !dotRef.current || !scrollRef.current) {
+    if (!dotRef.current || !scrollRef.current) {
       setLineStyle(null);
       return;
     }
 
-    const avatarBox = avatarRef.current.getBoundingClientRect();
     const dotBox = dotRef.current.getBoundingClientRect();
     const containerBox =
       scrollRef.current.parentElement.getBoundingClientRect();
 
-    const startX = avatarBox.left + avatarBox.width;
+    // Start from the far left of the container
+    const startX = containerBox.left;
     const endX = dotBox.left + dotBox.width / 2;
     const containerHeight = containerBox.height;
-    const top = containerHeight / 2 - 30;
+    const top = containerHeight / 2 - 28.5; // Aligned with the background line
 
     setLineStyle({
-      left: startX - containerBox.left,
+      left: 0,
       width: endX - startX,
       top,
     });
   };
 
+
   useEffect(() => {
-    window.addEventListener("resize", drawLine);
+    if (selectedPresident?.id) {
+      setLatestPresidentId(selectedPresident.id);
+    }
+  }, [selectedPresident]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      requestAnimationFrame(drawLine);
+    };
+    window.addEventListener("resize", handleUpdate);
     const scrollContainer = scrollRef.current;
-    scrollContainer?.addEventListener("scroll", drawLine);
+    scrollContainer?.addEventListener("scroll", handleUpdate);
 
     return () => {
-      window.removeEventListener("resize", drawLine);
-      scrollContainer?.removeEventListener("scroll", drawLine);
+      window.removeEventListener("resize", handleUpdate);
+      scrollContainer?.removeEventListener("scroll", handleUpdate);
     };
   }, []);
 
+
   // Auto-scroll selected dot into view
   useEffect(() => {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       drawLine();
-    }, 200);
+    }, 300); // Slightly longer for the DOM to settle
+
     if (selectedDate && dotRef.current && scrollRef.current) {
-      setTimeout(() => {
+      const scrollTimer = setTimeout(() => {
         const container = scrollRef.current;
         const dot = dotRef.current;
 
-        if (!container) return;
+        if (!container || !dot) return;
 
         const containerRect = container.getBoundingClientRect();
         const dotRect = dot.getBoundingClientRect();
@@ -123,9 +135,18 @@ export default function GazetteTimeline() {
           left: scrollOffset,
           behavior: "smooth",
         });
+        
+        // Redraw after scroll concludes
+        setTimeout(drawLine, 400);
       }, 100);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(scrollTimer);
+      };
     }
-  }, [selectedDate, gazetteData]);
+    return () => clearTimeout(timer);
+  }, [selectedDate, gazetteData, selectedPresident]);
+
 
   return (
     <Box
@@ -197,90 +218,7 @@ export default function GazetteTimeline() {
             />
           )}
 
-          {selectedPresident && (
-            <Box
-              sx={{
-                position: "absolute",
-                zIndex: 9,
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                flexShrink: 0,
-                transition: "all 0.3s ease",
-                pointerEvents: "none",
-              }}
-            >
-              {selectedPresident.id === latestPresidentId ? (
-                <Box
-                  sx={{
-                    textAlign: "center",
-                    minWidth: { xs: 60, sm: 80 },
-                    background: `linear-gradient(to right, ${colors.backgroundPrimary} 65%, rgba(0,0,0,0) 50%)`,
-                  }}
-                >
-                  <StyledBadge
-                    ref={avatarRef}
-                    overlap="circular"
-                    anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-                    variant="dot"
-                    sx={{
-                      border: `4px solid ${selectedPresident?.themeColorLight ||
-                        colors.timelineColor
-                        }`,
-                      backgroundColor: colors.backgroundPrimary,
-                      margin: "auto",
-                      borderRadius: 50,
-                    }}
-                  >
-                    <Avatar
-                      alt={selectedPresident.name}
-                      src={selectedPresident.imageUrl}
-                      sx={{
-                        width: { xs: 40, sm: 50 },
-                        height: { xs: 40, sm: 50 },
-                        border: `3px solid ${colors.backgroundPrimary}`,
-                        backgroundColor: colors.backgroundPrimary,
-                        margin: "auto",
-                      }}
-                    />
-                  </StyledBadge>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      mt: 1,
-                      color: colors.textPrimary,
-                      fontFamily: "poppins",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {utils.extractNameFromProtobuf(selectedPresident.name)}
-                  </Typography>
 
-                  <Typography
-                    variant="caption"
-                    sx={{ color: colors.textMuted, fontFamily: "poppins" }}
-                  >
-                    {selectedPresident.created.split("-")[0]} -{" "}
-                    {selectedPresident.endTime
-                      ? new Date(selectedPresident.endTime).getFullYear()
-                      : "Present"}
-                  </Typography>
-                </Box>
-              ) : (
-                <Box
-                  ref={avatarRef}
-                  sx={{
-                    display: "none",
-                    border: `3px solid ${colors.backgroundPrimary}`,
-                    backgroundColor: colors.backgroundPrimary,
-                    margin: "auto",
-                  }}
-                >
-                  <Box />
-                </Box>
-              )}
-            </Box>
-          )}
 
           <Box
             ref={scrollRef}
@@ -289,8 +227,9 @@ export default function GazetteTimeline() {
               overflowX: "auto",
               gap: 2,
               padding: { xs: 2, sm: 4 },
-              paddingLeft: { xs: 22, sm: 28 },
-              paddingRight: { xs: 8, sm: 14 },
+              paddingLeft: { xs: 4, sm: 6 },
+              paddingRight: { xs: 4, sm: 6 },
+
               paddingTop: { xs: 7, sm: 4 },
               flexWrap: "nowrap",
               scrollBehavior: "smooth",

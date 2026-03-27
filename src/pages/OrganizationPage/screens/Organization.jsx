@@ -8,9 +8,10 @@ import CabinetFlow from "../../cabinetFlowPage/screens/CabinetFlow"
 import LandscapeRequired from "../../../components/landscapeRequired";
 
 const Organization = ({ dateRange }) => {
-  const { selectedDate, selectedPresident } = useSelector(
+  const { selectedDate, selectedPresident, selectedTermId } = useSelector(
     (state) => state.presidency
   );
+
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -77,8 +78,9 @@ const Organization = ({ dateRange }) => {
         </>
       ) : (
         <LandscapeRequired onBack={() => toggleView("cabinet-structure")}>
-          <CabinetFlow key={selectedPresident?.id} presidentId={selectedPresident?.id}/>
+          <CabinetFlow key={`${selectedPresident?.id}_${selectedTermId}`} presidentId={selectedPresident?.id}/>
         </LandscapeRequired>
+
       )}
     </div>
   );

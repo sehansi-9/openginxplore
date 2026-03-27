@@ -3,24 +3,30 @@ import { useSelector } from "react-redux";
 import { Calendar, BarChart2 } from "lucide-react";
 import DateRangePicker from "../components/DateRangePicker";
 import CabinetFlowPanel from "../components/CabinetFlowPanel";
+import { useAllPresidents } from "../../../hooks/useAllPresidents";
 
 const CabinetFlow = ({ presidentId }) => {
     const { gazetteData } = useSelector((state) => state.gazettes);
     const gazetteDates = Array.isArray(gazetteData) ? gazetteData.map(item => item.date) : [];
-    const presidentRelationDict = useSelector(
-        (s) => s.presidency.presidentRelationDict
-    );
-    const presidentRelation = presidentRelationDict[presidentId];
-    const startDate = presidentRelation?.startTime?.split("T")[0];
-    let endDate = presidentRelation?.endTime;
+    const { data: presidentsArray } = useAllPresidents();
+    const president = (presidentsArray || []).find(p => p.id === presidentId);
 
-    if (!endDate) {
-        endDate = new Date().toISOString().split("T")[0];
-    } else {
-        const d = new Date(endDate);
-        d.setDate(d.getDate() - 1);
-        endDate = d.toISOString().split("T")[0];
+    let startDate = "";
+    let endDate = "";
+
+    if (president && president.terms && president.terms.length > 0) {
+        startDate = president.terms[0].start;
+        const lastEnd = president.terms[president.terms.length - 1].end;
+
+        endDate = lastEnd || new Date().toISOString().split("T")[0];
+
+        if (lastEnd) {
+            const d = new Date(lastEnd);
+            d.setDate(d.getDate() - 1);
+            endDate = d.toISOString().split("T")[0];
+        }
     }
+
 
     const [selectedDates, setSelectedDates] = useState(() => {
         const init = [];

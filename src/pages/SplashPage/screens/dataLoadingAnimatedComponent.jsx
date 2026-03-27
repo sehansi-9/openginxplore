@@ -6,10 +6,9 @@ import { setAllDepartmentData } from "../../../store/allDepartmentData";
 import presidentDetails from "../../../assets/personImages.json";
 import { setAllPerson } from "../../../store/allPersonData";
 import {
-  setPresidentRelationDict,
-  setPresidentDict,
   setSelectedPresident,
 } from "../../../store/presidencySlice";
+
 import { useDispatch, useSelector } from "react-redux";
 import { setGazetteDataClassic } from "../../../store/gazetteDate";
 import PersonProfile from "../../PersonProfilePage/screens/PersonProfile";
@@ -18,17 +17,22 @@ import DepartmentProfile from "../../DepartmentPage/screens/DepartmentProfile";
 import SplashPage from "../components/splash_page";
 import HomePage from "../../HomePage/screens/HomePage";
 
+
 export default function DataLoadingAnimatedComponent({ mode }) {
   const [loading, setLoading] = useState(false);
   const [showServerError, setShowServerError] = useState(false);
-  const { presidentDict, selectedPresident } = useSelector(
+  const { selectedPresident } = useSelector(
     (state) => state.presidency
   );
+
   const dispatch = useDispatch();
+
 
   const totalSteps = 4;
   const [completedSteps, setCompletedSteps] = useState(0);
   const [progress, setProgress] = useState(0);
+
+
 
   useEffect(() => {
     setProgress(Math.round((completedSteps / totalSteps) * 100));
@@ -36,7 +40,7 @@ export default function DataLoadingAnimatedComponent({ mode }) {
 
   useEffect(() => {
     const initialFetchData = async () => {
-      if (Object.keys(presidentDict).length !== 0) return;
+
 
       setLoading(true);
       setCompletedSteps(0);
@@ -62,7 +66,8 @@ export default function DataLoadingAnimatedComponent({ mode }) {
     };
 
     initialFetchData();
-  }, [presidentDict]);
+  }, []);
+
 
   const listToDict = (list) => {
     return list.reduce((acc, item) => {
@@ -75,55 +80,10 @@ export default function DataLoadingAnimatedComponent({ mode }) {
     try {
       const personResponse = await api.fetchAllPersons();
       const personList = await personResponse.json();
-      //dispatch(setAllPerson(personList.body));
       const personDict = listToDict(personList.body);
       dispatch(setAllPerson(personDict));
 
-      const presidentResponseRaw = await api.fetchPresidentsData();
-
-      // Sort by startTime
-      const presidentResponse = presidentResponseRaw.sort(
-        (a, b) => new Date(a.startTime) - new Date(b.startTime)
-      );
-
-      // Convert to dictionary keyed by id
-      const presidentRelationDict = listToDict(
-        presidentResponse.map((item) => ({
-          ...item,
-          id: item.relatedEntityId,
-        }))
-      );
-      dispatch(setPresidentRelationDict(presidentRelationDict));
-
-      // Map relatedEntityId → person using existing personDict
-      const presidentDictInDetail = presidentResponse
-        .map((p) => personDict[p.relatedEntityId])
-        .filter(Boolean);
-
-      // Enrich presidents
-      const enrichedPresidents = presidentDictInDetail.map((president) => {
-        const matchedDetail = presidentDetails.find((detail) =>
-          detail.personName
-            .toLowerCase()
-            .includes(
-              utils.extractNameFromProtobuf(president.name).toLowerCase()
-            )
-        );
-
-        return {
-          ...president,
-          imageUrl: matchedDetail?.imageUrl || null,
-          themeColorLight: matchedDetail?.themeColorLight || null,
-        };
-      });
-
-      dispatch(setPresidentDict(enrichedPresidents));
-
-      // Only select the last president if no president is currently selected
-      if (!selectedPresident) {
-        const selectedPre = enrichedPresidents[enrichedPresidents.length - 1];
-        dispatch(setSelectedPresident(selectedPre));
-      }
+      // No need to fetch presidents here, handled by hook
     } catch (e) {
       setShowServerError(true);
       console.log(`Error fetching person data : ${e.message}`);
@@ -180,21 +140,21 @@ export default function DataLoadingAnimatedComponent({ mode }) {
   return (
     <>
       {loading ? (
+
         <SplashPage progress={progress} setProgress={setProgress} />
       ) : showServerError ? (
         <Error500 />
       ) : (
         <>
-          {Object.keys(presidentDict).length > 0 && mode === "orgchart" ? (
+          {mode === "orgchart" ? (
             <HomePage />
-          ) : Object.keys(presidentDict).length > 0 &&
-            mode === "person-profile" ? (
+          ) : mode === "person-profile" ? (
             <PersonProfile />
           ) : (
-            Object.keys(presidentDict).length > 0 &&
             mode === "department-profile" && <DepartmentProfile />
           )}
         </>
+
       )}
     </>
   );
