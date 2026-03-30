@@ -1,9 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { useSelector } from "react-redux";
-import utils from "../../../utils/utils";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import Tooltip from "@mui/material/Tooltip";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAllPresidents } from "../../../hooks/useAllPresidents";
@@ -146,10 +144,6 @@ export default function TimeRangeSelector({
 
     if (urlStart === newStart && urlEnd === newEnd) return;
 
-    // Only update if current URL is missing dates OR if the change seems to be 
-    // internal (i.e. path hasn't changed, but dates did)
-    // Actually, if we are transitioning to a NEW path, we should let that path's 
-    // initial parameters win.
     params.set("startDate", newStart);
     params.set("endDate", newEnd);
 
@@ -158,8 +152,6 @@ export default function TimeRangeSelector({
   }, [startDate, endDate]); // Remove location.pathname from deps to avoid overwriting on navigation
 
   useEffect(() => {
-    // We use window.location.search directly to ensure we have the latest params
-    // regardless of the searchParams hook state or router updates.
     const params = new URLSearchParams(window.location.search);
     const startDateParam = params.get("startDate");
     const endDateParam = params.get("endDate");
@@ -217,9 +209,6 @@ export default function TimeRangeSelector({
       }
     }
 
-    // Only update state if different to prevent loops
-    // Compare using ISO strings (YYYY-MM-DD) to ignore time components
-    // (e.g., "today" with time vs "today" from URL at midnight)
     const urlStartStr = urlStart.toISOString().split("T")[0];
     const urlEndStr = urlEnd.toISOString().split("T")[0];
     const stateStartStr = startDate.toISOString().split("T")[0];
@@ -870,48 +859,44 @@ export default function TimeRangeSelector({
 
           {/* Dropdown menu */}
           {isDropdownOpen && (
-            <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-md shadow-lg overflow-hidden">
+            <div className="absolute z-50 mt-1 w-full bg-background border border-border rounded-md shadow-lg">
               {Object.entries(presidents).map(([id, data]) => (
                 <div key={id} className="relative flex border-b border-border/10 last:border-0 group">
-                  {/* President row */}
+                  {/* President Row */}
                   <button
                     className={`flex-1 px-3 py-2 text-left flex justify-between items-center cursor-pointer transition-colors ${activePresident === id && !expandedPresidentId
                       ? "bg-accent/20 text-primary"
                       : "text-primary hover:bg-foreground/5"
                       }`}
                     onClick={() => {
-                      // For single term, select it. For multi-term, select the latest term but don't open drawer.
-                      const term = data.terms[data.terms.length - 1];
-                      setActivePresident(id);
-                      setStartDate(new Date(term.start));
-                      setTempStartDate(new Date(term.start));
-                      setEndDate(new Date(term.end));
-                      setTempEndDate(new Date(term.end));
-                      setSelectedRange([
-                        new Date(term.start).getUTCFullYear(),
-                        new Date(term.end).getUTCFullYear(),
-                      ]);
-                      setPreciseMode(true);
-                      setActivePreset(null);
-                      setIsDropdownOpen(false);
-                      setExpandedPresidentId(null);
+                      if (data.terms.length > 1) {
+                        setExpandedPresidentId(expandedPresidentId === id ? null : id);
+                      } else {
+                        const term = data.terms[0];
+                        setActivePresident(id);
+                        setStartDate(new Date(term.start));
+                        setTempStartDate(new Date(term.start));
+                        setEndDate(new Date(term.end));
+                        setTempEndDate(new Date(term.end));
+                        setSelectedRange([
+                          new Date(term.start).getUTCFullYear(),
+                          new Date(term.end).getUTCFullYear(),
+                        ]);
+                        setPreciseMode(true);
+                        setActivePreset(null);
+                        setIsDropdownOpen(false);
+                        setExpandedPresidentId(null);
+                      }
                     }}
                   >
                     <span className="truncate">{data.name}</span>
+                    {data.terms.length > 1 && (
+                      <ChevronRight
+                        size={14}
+                        className={`transition-transform duration-200 text-primary/60 group-hover:text-primary ${expandedPresidentId === id ? "rotate-90 md:rotate-0" : ""}`}
+                      />
+                    )}
                   </button>
-
-                  {data.terms.length > 1 && (
-                    <button
-                      className={`px-2 flex items-center justify-center border-l border-border/10 transition-colors hover:bg-accent/10 hover:text-accent cursor-pointer ${expandedPresidentId === id ? "bg-accent/10 text-accent" : "text-primary/60"
-                        }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedPresidentId(expandedPresidentId === id ? null : id);
-                      }}
-                    >
-                      <ChevronRight size={14} className={`transition-transform duration-200 ${expandedPresidentId === id ? "rotate-90 md:rotate-0" : ""}`} />
-                    </button>
-                  )}
 
                   {/* Nested terms drawer */}
                   {data.terms.length > 1 && expandedPresidentId === id && (

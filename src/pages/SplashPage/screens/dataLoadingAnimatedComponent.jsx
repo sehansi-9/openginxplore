@@ -1,15 +1,9 @@
 import { useState, useEffect } from "react";
 import api from "../../../services/services";
-import utils from "../../../utils/utils";
-import { setAllMinistryData } from "../../../store/allMinistryData";
 import { setAllDepartmentData } from "../../../store/allDepartmentData";
-import presidentDetails from "../../../assets/personImages.json";
 import { setAllPerson } from "../../../store/allPersonData";
-import {
-  setSelectedPresident,
-} from "../../../store/presidencySlice";
 
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { setGazetteDataClassic } from "../../../store/gazetteDate";
 import PersonProfile from "../../PersonProfilePage/screens/PersonProfile";
 import Error500 from "../../ErrorBoundaries/screens/500Error";
@@ -21,14 +15,11 @@ import HomePage from "../../HomePage/screens/HomePage";
 export default function DataLoadingAnimatedComponent({ mode }) {
   const [loading, setLoading] = useState(false);
   const [showServerError, setShowServerError] = useState(false);
-  const { selectedPresident } = useSelector(
-    (state) => state.presidency
-  );
 
   const dispatch = useDispatch();
 
 
-  const totalSteps = 4;
+  const totalSteps = 3;
   const [completedSteps, setCompletedSteps] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -55,7 +46,6 @@ export default function DataLoadingAnimatedComponent({ mode }) {
 
       await Promise.allSettled([
         track(fetchPersonData()),
-        track(fetchAllMinistryData()),
         track(fetchAllDepartmentData()),
         track(fetchAllGazetteDate()),
       ]);
@@ -99,31 +89,6 @@ export default function DataLoadingAnimatedComponent({ mode }) {
     } catch (e) {
       setShowServerError(true);
       console.log(`Error fetching department data : ${e.message}`);
-    }
-  };
-
-  const fetchAllMinistryData = async () => {
-    try {
-      const [stateRes, cabinetRes] = await Promise.all([
-        api.fetchAllStateMinistries(),
-        api.fetchAllCabinetMinistries(),
-      ]);
-
-      const stateData = await stateRes.json();
-      const cabinetData = await cabinetRes.json();
-
-      const stateDict = listToDict(stateData.body);
-      const cabinetDict = listToDict(cabinetData.body);
-
-      const combined = {
-        ...stateDict,
-        ...cabinetDict,
-      };
-
-      dispatch(setAllMinistryData(combined));
-    } catch (e) {
-      setShowServerError(true);
-      console.log(`Error fetching ministry data : ${e.message}`);
     }
   };
 

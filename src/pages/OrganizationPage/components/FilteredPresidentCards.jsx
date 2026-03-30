@@ -1,6 +1,5 @@
 import { useSelector, useDispatch } from "react-redux";
 import { useState, useMemo, useEffect, useRef } from "react";
-import utils from "../../../utils/utils";
 import {
   setSelectedPresident,
   setSelectedDate,
@@ -14,33 +13,27 @@ import { useAllPresidents } from "../../../hooks/useAllPresidents";
 
 export default function FilteredPresidentCards({ dateRange = [null, null] }) {
   const dispatch = useDispatch();
+  const location = useLocation();
   const { data: presidentsArray, isLoading: isPresidentsLoading } = useAllPresidents();
-  const gazetteDateClassic = useSelector((s) => s.gazettes.gazetteDataClassic);
-  const selectedPresident = useSelector((s) => s.presidency.selectedPresident);
   const selectedDate = useSelector((s) => s.presidency.selectedDate);
+  const { selectedTermId } = useSelector((state) => state.presidency);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [initializedFromUrl, setInitializedFromUrl] = useState(false);
-  const [urlInitComplete, setUrlInitComplete] = useState(false);
   const prevDateRangeRef = useRef([null, null]);
-  const lastProcessedUrlRef = useRef("");
 
-  const location = useLocation()
-
+  // 1. Flatten and Filter Presidents based on Date Range and Search
   const filteredPresidents = useMemo(() => {
     if (!presidentsArray || isPresidentsLoading) return [];
 
     const [rangeStart, rangeEnd] = dateRange;
-
-    // Flatten presidents into individual terms
     const allTerms = [];
+
     presidentsArray.forEach((p) => {
       p.terms.forEach((term, index) => {
         allTerms.push({
           ...p,
           term,
           termIndex: index,
-          // Unique key for the card: presidentId + term start
           termId: `${p.id}_${term.start}`
         });
       });
@@ -49,42 +42,26 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     return allTerms
       .filter((item) => {
         if (!rangeStart || !rangeEnd) return true;
-
         const presStart = new Date(item.term.start);
         const presEnd = item.term.end ? new Date(item.term.end) : new Date();
         return presStart < rangeEnd && presEnd > rangeStart;
       })
       .filter((item) => {
         if (!searchTerm) return true;
-        const nameText = item.name;
-
         const q = searchTerm.toLowerCase();
-        const matchesName = nameText.toLowerCase().includes(q);
-
-        const startYear = item.term.start.split("-")[0];
-        const endYear = item.term.end ? new Date(item.term.end).getFullYear() : "Present";
-        const termStr = `${startYear} - ${endYear}`;
-        const matchesTerm = termStr.toLowerCase().includes(q);
-
-        return matchesName || matchesTerm;
+        return item.name.toLowerCase().includes(q) ||
+          `${item.term.start.split("-")[0]} - ${item.term.end?.split("-")[0] || "Present"}`.includes(q);
       })
       .sort((a, b) => new Date(a.term.start) - new Date(b.term.start));
-
   }, [presidentsArray, isPresidentsLoading, dateRange, searchTerm]);
 
-  const { selectedTermId } = useSelector((state) => state.presidency);
-
-  const selectPresidentAndDates = (
-    item,
-    urlDateRange = null,
-    urlSelectedDate = null
-  ) => {
+  // 2. Selection Logic (Updates Redux and Filters Gazettes)
+  const selectPresidentAndDates = (item, urlSelectedDate = null) => {
     if (!item) {
       dispatch(setSelectedPresident(null));
       dispatch(setGazetteData([]));
       dispatch(setSelectedDate(null));
       dispatch(setSelectedTermId(null));
-
       return;
     }
 
@@ -92,191 +69,83 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
     dispatch(setSelectedPresident(president));
     dispatch(setSelectedTermId(termId));
 
-
-    const [rangeStart, rangeEnd] = urlDateRange || dateRange;
-
+    // Refilter gazettes based on intersection of range and term
+    const [rangeStart, rangeEnd] = dateRange;
     const presStart = new Date(term.start);
-    const presEnd = term.end
-      ? new Date(term.end)
-      : new Date();
+    const presEnd = term.end ? new Date(term.end) : new Date();
 
-    const finalStart = rangeStart
-      ? new Date(Math.max(presStart, rangeStart))
-      : presStart;
-    const finalEnd = rangeEnd ? new Date(Math.min(presEnd, rangeEnd)) : presEnd;
+    const effectiveStart = rangeStart ? new Date(Math.max(presStart.getTime(), rangeStart.getTime())) : presStart;
+    const effectiveEnd = rangeEnd ? new Date(Math.min(presEnd.getTime(), rangeEnd.getTime())) : presEnd;
 
-    const filteredDates = gazetteDateClassic
+    const filteredDates = (term.gazettes_published || [])
       .filter((d) => {
         const dd = new Date(d.date);
-        // Exclusive of end date if term has ended, to prevent overlap with next president's start
-        return dd >= finalStart && (term.end ? dd < finalEnd : dd <= finalEnd);
-      });
-
+        return dd >= effectiveStart && (term.end ? dd < effectiveEnd : dd <= effectiveEnd);
+      })
+      .map(d => ({
+        date: d.date,
+        gazetteId: d.ids || [] // Compatible mapping for GazetteTimeline sources
+      }));
 
     dispatch(setGazetteData(filteredDates));
 
-    let selectedDateValue;
+    // Update the currently viewed date
+    let dateToSet;
     if (urlSelectedDate) {
-      selectedDateValue = { date: urlSelectedDate };
+      dateToSet = { date: urlSelectedDate };
     } else if (filteredDates.length > 0) {
-      selectedDateValue = filteredDates[filteredDates.length - 1];
+      dateToSet = filteredDates[filteredDates.length - 1]; // Pick latest in range
     } else {
-      selectedDateValue = { date: finalEnd.toISOString().split("T")[0] };
+      dateToSet = { date: effectiveEnd.toISOString().split("T")[0] };
     }
-
-    dispatch(setSelectedDate(selectedDateValue));
+    dispatch(setSelectedDate(dateToSet));
   };
 
-
-
+  // 3. Sync State with Component (Single Source of Truth)
   useEffect(() => {
-    if (initializedFromUrl) return;
+    if (!presidentsArray?.length) return;
 
-    if (!presidentsArray || isPresidentsLoading) return;
-    if (!gazetteDateClassic || gazetteDateClassic.length === 0) return;
-
-    const params = new URLSearchParams(window.location.search);
-    let urlSelectedDate = params.get("selectedDate");
-    let urlStartDate = params.get("startDate");
-    let urlEndDate = params.get("endDate");
-
-    if (urlSelectedDate) {
-      // Find term covering this date
-      const termToSelect = filteredPresidents.find((p) => {
-        const start = new Date(p.term.start);
-        const end = p.term.end ? new Date(p.term.end) : new Date();
-        return new Date(urlSelectedDate) >= start && new Date(urlSelectedDate) < end;
-      });
-
-      if (termToSelect) {
-        const urlRange = [new Date(urlStartDate), new Date(urlEndDate)];
-        selectPresidentAndDates(termToSelect, urlRange, urlSelectedDate);
-        setInitializedFromUrl(true);
-        setUrlInitComplete(true);
-        return;
-      }
-    }
-
-    if (filteredPresidents.length > 0) {
-      selectPresidentAndDates(filteredPresidents[filteredPresidents.length - 1]);
-      setInitializedFromUrl(true);
-    }
-
-  }, [
-    presidentsArray,
-    isPresidentsLoading,
-    gazetteDateClassic,
-    initializedFromUrl,
-    filteredPresidents
-  ]);
-
-
-  useEffect(() => {
-    if (!initializedFromUrl) return;
-
-    const [prevStart, prevEnd] = prevDateRangeRef.current;
     const [currStart, currEnd] = dateRange;
+    const [prevStart, prevEnd] = prevDateRangeRef.current;
+    const isSameRange = currStart?.getTime() === prevStart?.getTime() && currEnd?.getTime() === prevEnd?.getTime();
 
-    // If current range is null, we can't filter yet.
-    // We don't skip the first non-null range update anymore.
-    if (currStart === null && currEnd === null) {
-      prevDateRangeRef.current = dateRange;
-      return;
-    }
-
-    if (prevStart === currStart && prevEnd === currEnd) return;
-
-    if (urlInitComplete) {
-      setUrlInitComplete(false);
-      prevDateRangeRef.current = dateRange;
-      return;
-    }
-
-    // Check if this date range change matches the URL we just processed
-    const currentUrlSearch = location.search;
-    const params = new URLSearchParams(currentUrlSearch);
-    const urlStartDate = params.get("startDate");
-    const urlEndDate = params.get("endDate");
-    const hasFilterByName = params.get("filterByName");
-
-    const dateRangeMatchesUrl =
-      currStart && currEnd &&
-      urlStartDate && urlEndDate &&
-      currStart.toISOString().split("T")[0] === urlStartDate &&
-      currEnd.toISOString().split("T")[0] === urlEndDate;
-
-    // If date range doesn't match URL AND it's not a minister search navigation, 
-    // this is a manual change - clear the processed URL
-    if (!dateRangeMatchesUrl && !hasFilterByName) {
-      lastProcessedUrlRef.current = "";
-    }
-
-    // Don't auto-select if we just processed a URL change AND the date range matches that URL
-    if (lastProcessedUrlRef.current === currentUrlSearch && dateRangeMatchesUrl && currentUrlSearch.includes('selectedDate')) {
-      prevDateRangeRef.current = dateRange;
-      return;
-    }
-
-    if (filteredPresidents.length > 0) {
-      // Check if current selection is still in the filtered list
-      const isStillInList = filteredPresidents.some(p => p.termId === selectedTermId);
-
-      if (!isStillInList) {
-        // Only then auto-select the latest
-        selectPresidentAndDates(filteredPresidents[filteredPresidents.length - 1]);
-      }
-    } else {
-      selectPresidentAndDates(null);
-    }
-
-    prevDateRangeRef.current = dateRange;
-  }, [dateRange, filteredPresidents, initializedFromUrl, urlInitComplete, selectedTermId]);
-
-
-  useEffect(() => {
-    if (!selectedDate?.date) return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("selectedDate", selectedDate.date);
-    window.history.replaceState({}, "", url.toString());
-  }, [selectedDate]);
-
-  // Monitor URL parameter changes when already on /organization route
-  useEffect(() => {
-    // Only run after initial URL initialization is complete
-    if (!initializedFromUrl) return;
-
-    // Don't run if we don't have the required data yet
-    if (!presidentsArray || isPresidentsLoading) return;
-    if (!gazetteDateClassic || gazetteDateClassic.length === 0) return;
-
-    const currentUrlSearch = location.search;
-    const params = new URLSearchParams(currentUrlSearch);
+    const params = new URLSearchParams(location.search);
     const urlSelectedDate = params.get("selectedDate");
-    const urlStartDate = params.get("startDate");
-    const urlEndDate = params.get("endDate");
 
-    // If no URL params, don't do anything
-    if (!urlSelectedDate || !urlStartDate || !urlEndDate) return;
+    // Perform fresh selection if range changed OR if this is the initial mount with URL params
+    if (!isSameRange || (urlSelectedDate && !prevStart)) {
+      let targetItem;
 
-    // Check if we've already processed this exact URL
-    const hasFilterByName = params.get("filterByName");
-    if (lastProcessedUrlRef.current === currentUrlSearch && !hasFilterByName) return;
+      if (urlSelectedDate && !prevStart) {
+        // Initial load: pick based on URL
+        targetItem = filteredPresidents.find(p => {
+          const start = new Date(p.term.start);
+          const end = p.term.end ? new Date(p.term.end) : new Date();
+          return new Date(urlSelectedDate) >= start && new Date(urlSelectedDate) < end;
+        });
+      }
 
-    // Find the term covering the selected date
-    const termToSelect = filteredPresidents.find((p) => {
-      const start = new Date(p.term.start);
-      const end = p.term.end ? new Date(p.term.end) : new Date();
-      return new Date(urlSelectedDate) >= start && new Date(urlSelectedDate) < end;
-    });
+      // If no URL match or it's a range move, ALWAYS pick the latest in range
+      if (!targetItem) {
+        targetItem = filteredPresidents[filteredPresidents.length - 1];
+      }
 
-    if (termToSelect) {
-      const urlRange = [new Date(urlStartDate), new Date(urlEndDate)];
-      selectPresidentAndDates(termToSelect, urlRange, urlSelectedDate);
-      lastProcessedUrlRef.current = currentUrlSearch;
+      selectPresidentAndDates(targetItem, urlSelectedDate && !prevStart ? urlSelectedDate : null);
     }
-  }, [location.search, location.key, initializedFromUrl, presidentsArray, isPresidentsLoading, gazetteDateClassic, filteredPresidents]);
 
+    prevDateRangeRef.current = [currStart, currEnd];
+  }, [dateRange, filteredPresidents]);
 
+  // 4. Update URL whenever selectedDate changes
+  useEffect(() => {
+    if (selectedDate?.date) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("selectedDate") !== selectedDate.date) {
+        url.searchParams.set("selectedDate", selectedDate.date);
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+  }, [selectedDate]);
 
   return (
     <div className="rounded-lg w-full">
@@ -298,45 +167,38 @@ export default function FilteredPresidentCards({ dateRange = [null, null] }) {
         <div className="flex overflow-x-auto snap-x snap-mandatory md:grid md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3 pb-2 md:pb-0 no-scrollbar">
           {filteredPresidents.map((p) => {
             const isSelected = selectedTermId === p.termId;
-            const nameText = p.name;
-
             const startYear = p.term.start.split("-")[0];
             const endYear = p.term.end ? new Date(p.term.end).getFullYear() : "Present";
-            const term = `${startYear} - ${endYear}`;
+            const termDisplay = `${startYear} - ${endYear}`;
+
             return (
               <button
                 key={p.termId}
                 onClick={() => selectPresidentAndDates(p)}
                 className={`min-w-[60vw] sm:min-w-[300px] md:min-w-0 flex-shrink-0 snap-center flex items-center p-1.5 md:p-2 rounded-lg border transition-all duration-200 hover:cursor-pointer
-    ${isSelected
-                    ? "bg-accent/20 border-accent/35 shadow-md"
-                    : "bg-foreground/5 border-primary/15 hover:bg-foreground/15"
-                  }`}
+                  ${isSelected ? "bg-accent/20 border-accent/35 shadow-md" : "bg-foreground/5 border-primary/15 hover:bg-foreground/15"}`}
               >
                 <img
                   src={p.imageUrl || p.image || ""}
-                  alt={nameText}
+                  alt={p.name}
                   className="md:w-14 w-10 md:h-14 h-10 object-cover rounded-full mr-3 border border-border flex-shrink-0"
                 />
                 <div className="flex flex-col flex-1 text-left min-w-0">
-                  <p
-                    className={`font-medium text-xs md:text-sm break-words whitespace-normal ${isSelected ? "text-accent" : "text-primary"
-                      }`}
-                  >
-                    {nameText}
+                  <p className={`font-medium text-xs md:text-sm break-words whitespace-normal ${isSelected ? "text-accent" : "text-primary"}`}>
+                    {p.name}
                   </p>
                   <p className="text-xs md:text-sm text-primary/50 break-words whitespace-normal">
-                    {term}
+                    {termDisplay}
                   </p>
                   <div className="flex flex-nowrap gap-3 mt-1">
                     <Link
                       to={`/person-profile/${p?.id}`}
                       onClick={(e) => e.stopPropagation()}
                       state={{ mode: "back", from: location.pathname + location.search }}
-                      className="text-primary/75 text-xs md:text-sm hover:text-accent transition-all animation duration-200 mt-1 flex"
+                      className="text-primary/75 text-xs md:text-sm hover:text-accent transition-all duration-200 mt-1 flex"
                     >
                       <EyeIcon size={16} className="mr-1" />
-                      <p>View Profile</p>
+                      View Profile
                     </Link>
                   </div>
                 </div>

@@ -1,15 +1,12 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { Box, Avatar, Typography, IconButton, Divider } from "@mui/material";
+import { useEffect, useRef, useState } from "react";
+import { Box, Typography, IconButton } from "@mui/material";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
 import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
 import { useSelector, useDispatch } from "react-redux";
 import { setSelectedDate } from "../../../store/presidencySlice";
-import utils from "../../../utils/utils";
-import StyledBadge from "../../../components/materialCustomAvatar";
 import { useThemeContext } from "../../../context/themeContext";
 import { Tooltip } from "@mui/material";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import { Divide, Files } from "lucide-react";
 
 export default function GazetteTimeline() {
   const dispatch = useDispatch();
@@ -24,14 +21,12 @@ export default function GazetteTimeline() {
 
   //ref
   const scrollRef = useRef(null);
-  const avatarRef = useRef(null);
   const dotRef = useRef(null);
 
   //states
   const [lineStyle, setLineStyle] = useState(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-  const [latestPresidentId, setLatestPresidentId] = useState(null);
 
   const { colors } = useThemeContext();
 
@@ -48,14 +43,18 @@ export default function GazetteTimeline() {
   useEffect(() => {
     updateScrollButtons();
     const el = scrollRef.current;
+
+    const timeoutId = setTimeout(updateScrollButtons, 500);
+
     el?.addEventListener("scroll", updateScrollButtons);
     window.addEventListener("resize", updateScrollButtons);
 
     return () => {
+      clearTimeout(timeoutId);
       el?.removeEventListener("scroll", updateScrollButtons);
       window.removeEventListener("resize", updateScrollButtons);
     };
-  }, []);
+  }, [gazetteData]);
 
   const scroll = (direction) => {
     if (!scrollRef.current) return;
@@ -75,8 +74,6 @@ export default function GazetteTimeline() {
     const dotBox = dotRef.current.getBoundingClientRect();
     const containerBox =
       scrollRef.current.parentElement.getBoundingClientRect();
-
-    // Start from the far left of the container
     const startX = containerBox.left;
     const endX = dotBox.left + dotBox.width / 2;
     const containerHeight = containerBox.height;
@@ -89,33 +86,33 @@ export default function GazetteTimeline() {
     });
   };
 
-
-  useEffect(() => {
-    if (selectedPresident?.id) {
-      setLatestPresidentId(selectedPresident.id);
-    }
-  }, [selectedPresident]);
-
   useEffect(() => {
     const handleUpdate = () => {
       requestAnimationFrame(drawLine);
     };
+
     window.addEventListener("resize", handleUpdate);
     const scrollContainer = scrollRef.current;
-    scrollContainer?.addEventListener("scroll", handleUpdate);
+
+    // Attach scroll listener to the latest ref
+    if (scrollContainer) {
+      scrollContainer.addEventListener("scroll", handleUpdate);
+    }
 
     return () => {
       window.removeEventListener("resize", handleUpdate);
-      scrollContainer?.removeEventListener("scroll", handleUpdate);
+      if (scrollContainer) {
+        scrollContainer.removeEventListener("scroll", handleUpdate);
+      }
     };
-  }, []);
+  }, [gazetteData]);
 
 
   // Auto-scroll selected dot into view
   useEffect(() => {
     const timer = setTimeout(() => {
       drawLine();
-    }, 300); // Slightly longer for the DOM to settle
+    }, 300);
 
     if (selectedDate && dotRef.current && scrollRef.current) {
       const scrollTimer = setTimeout(() => {
@@ -135,8 +132,7 @@ export default function GazetteTimeline() {
           left: scrollOffset,
           behavior: "smooth",
         });
-        
-        // Redraw after scroll concludes
+
         setTimeout(drawLine, 400);
       }, 100);
       return () => {
@@ -227,8 +223,8 @@ export default function GazetteTimeline() {
               overflowX: "auto",
               gap: 2,
               padding: { xs: 2, sm: 4 },
-              paddingLeft: { xs: 4, sm: 6 },
-              paddingRight: { xs: 4, sm: 6 },
+              paddingLeft: { xs: 22, sm: 28 },
+              paddingRight: { xs: 8, sm: 14 },
 
               paddingTop: { xs: 7, sm: 4 },
               flexWrap: "nowrap",
