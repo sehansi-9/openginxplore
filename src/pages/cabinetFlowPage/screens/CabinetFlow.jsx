@@ -7,6 +7,7 @@ import { useAllPresidents } from "../../../hooks/useAllPresidents";
 
 const CabinetFlow = ({ presidentId }) => {
     const { gazetteData } = useSelector((state) => state.gazettes);
+    const { selectedTermId } = useSelector((state) => state.presidency);
     const gazetteDates = Array.isArray(gazetteData) ? gazetteData.map(item => item.date) : [];
     const { data: presidentsArray } = useAllPresidents();
     const president = (presidentsArray || []).find(p => p.id === presidentId);
@@ -15,13 +16,16 @@ const CabinetFlow = ({ presidentId }) => {
     let endDate = "";
 
     if (president && president.terms && president.terms.length > 0) {
-        startDate = president.terms[0].start;
-        const lastEnd = president.terms[president.terms.length - 1].end;
+        // Find the specific term using selectedTermId, or fallback to the first term
+        const term = president.terms.find(t => `${president.id}_${t.start}` === selectedTermId) || president.terms[0];
+        
+        startDate = term.start;
+        const termEnd = term.end;
 
-        endDate = lastEnd || new Date().toISOString().split("T")[0];
+        endDate = termEnd || new Date().toISOString().split("T")[0];
 
-        if (lastEnd) {
-            const d = new Date(lastEnd);
+        if (termEnd) {
+            const d = new Date(termEnd);
             d.setDate(d.getDate() - 1);
             endDate = d.toISOString().split("T")[0];
         }
